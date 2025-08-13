@@ -10,6 +10,7 @@ venv/
 
 # Data/outputs
 reports/*.pdf
+!reports/research_report.pdf
 *.png
 *.csv
 *.parquet
