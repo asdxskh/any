@@ -81,10 +81,14 @@ def get_co2_noaa() -> Optional[pd.DataFrame]:
         header=None,
         names=["year", "month", "decimal", "average", "interpolated", "trend", "days"],
     )
-    df = df[df["average"] != -99.99]
-    df = df[["year", "month", "average"]]
-    annual = df.groupby("year")["average"].mean().reset_index()
-    return annual.rename(columns={"average": "co2_ppm"})
+    df["average"] = pd.to_numeric(df["average"], errors="coerce")
+    df = df[df["average"] > 0]
+    co2_year = (
+        df.groupby("year", as_index=False)["average"].mean().rename(
+            columns={"average": "co2_ppm"}
+        )
+    )
+    return co2_year
 
 
 def get_berkeley_country() -> Optional[pd.DataFrame]:
@@ -94,9 +98,12 @@ def get_berkeley_country() -> Optional[pd.DataFrame]:
     if text is None:
         return None
     df = pd.read_csv(io.StringIO(text), sep="\s+", comment="#")
-    df = df[["Country", "Year", "Anomaly"]]
-    df["Anomaly"] = pd.to_numeric(df["Anomaly"], errors="coerce")
-    return df.dropna(subset=["Anomaly"])
+    df = df[["Country", "Year", "Anomaly"]].rename(
+        columns={"Country": "country", "Year": "year", "Anomaly": "temp_anomaly_c"}
+    )
+    df["temp_anomaly_c"] = pd.to_numeric(df["temp_anomaly_c"], errors="coerce")
+    df["year"] = pd.to_numeric(df["year"], errors="coerce")
+    return df.dropna()
 
 
 def synthetic_co2_df() -> pd.DataFrame:
@@ -106,12 +113,12 @@ def synthetic_co2_df() -> pd.DataFrame:
 def synthetic_country_df() -> pd.DataFrame:
     return pd.DataFrame(
         [
-            {"Country": "United States", "Year": 2020, "Anomaly": 1.0},
-            {"Country": "United States", "Year": 2021, "Anomaly": 1.1},
-            {"Country": "France", "Year": 2020, "Anomaly": 0.8},
-            {"Country": "France", "Year": 2021, "Anomaly": 0.9},
-            {"Country": "Australia", "Year": 2020, "Anomaly": 0.7},
-            {"Country": "Australia", "Year": 2021, "Anomaly": 0.8},
+            {"country": "United States", "year": 2020, "temp_anomaly_c": 1.0},
+            {"country": "United States", "year": 2021, "temp_anomaly_c": 1.1},
+            {"country": "France", "year": 2020, "temp_anomaly_c": 0.8},
+            {"country": "France", "year": 2021, "temp_anomaly_c": 0.9},
+            {"country": "Australia", "year": 2020, "temp_anomaly_c": 0.7},
+            {"country": "Australia", "year": 2021, "temp_anomaly_c": 0.8},
         ]
     )
 
@@ -129,35 +136,28 @@ def country_to_continent(name: str) -> Optional[str]:
 
 
 def main() -> None:
-    co2_df = get_co2_noaa()
-    if co2_df is None:
-        co2_df = synthetic_co2_df()
+    co2_year = get_co2_noaa()
+    if co2_year is None:
+        co2_year = synthetic_co2_df()
 
     temp_df = get_berkeley_country()
     if temp_df is None:
         temp_df = synthetic_country_df()
 
-    temp_df["Continent"] = temp_df["Country"].apply(country_to_continent)
-    temp_df = temp_df.dropna(subset=["Continent"])
+    temp_df["continent"] = temp_df["country"].apply(country_to_continent)
+    temp_df = temp_df.dropna(subset=["continent"])
 
-    country_year = (
-        temp_df.groupby(["Country", "Continent", "Year"])["Anomaly"].mean().reset_index()
-    )
+    temp_global = temp_df.groupby("year", as_index=False)["temp_anomaly_c"].mean()
+    temp_cont = temp_df.groupby(["continent", "year"], as_index=False)["temp_anomaly_c"].mean()
 
-    global_year = (
-        country_year.groupby("Year")["Anomaly"].mean().reset_index().rename(
-            columns={"Year": "year", "Anomaly": "temp_anomaly_c"}
-        )
-    )
-    global_df = co2_df.merge(global_year, on="year", how="inner").sort_values("year")
+    global_df = temp_global.merge(co2_year, on="year", how="inner").sort_values("year")
+    continent_df = temp_cont.merge(co2_year, on="year", how="left").dropna(subset=["co2_ppm"])
 
-    continent_df = (
-        country_year.groupby(["Continent", "Year"])["Anomaly"].mean().reset_index().rename(
-            columns={"Continent": "continent", "Year": "year", "Anomaly": "temp_anomaly_c"}
-        )
-    )
-    continent_df = continent_df.merge(co2_df, on="year", how="left")
-    continent_df = continent_df.dropna(subset=["co2_ppm"])
+    global_df["year"] = global_df["year"].astype(int)
+    continent_df["year"] = continent_df["year"].astype(int)
+
+    global_df = global_df.round(3)
+    continent_df = continent_df.round(3)
 
     latest_year = int(global_df["year"].max())
     latest_co2 = float(global_df.loc[global_df["year"] == latest_year, "co2_ppm"].iloc[0])
@@ -185,7 +185,7 @@ def main() -> None:
                 }
             )
 
-    snapshot_df = pd.DataFrame(snapshot_rows)
+    snapshot_df = pd.DataFrame(snapshot_rows).round(3)
 
     global_csv = os.path.join(DATA_DIR, "global_timeseries.csv")
     continent_csv = os.path.join(DATA_DIR, "continent_timeseries.csv")
