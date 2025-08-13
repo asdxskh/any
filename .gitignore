@@ -1,19 +1,6 @@
-
-# Python
 __pycache__/
 *.pyc
-*.pyo
-*.pyd
 .venv/
 venv/
 .env
-
-# Data/outputs
-reports/*.pdf
-*.png
-*.csv
-*.parquet
-
-# OS
-.DS_Store
-Thumbs.db
+reports/
