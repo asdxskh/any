@@ -5,6 +5,9 @@ on:
     - cron: '0 6 * * 1'  # every Monday 06:00 UTC
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -24,7 +27,7 @@ jobs:
 
       - name: Generate report
         env:
-          USE_REAL_DATA: '0'  # сменим на '1' позже
+          USE_REAL_DATA: '0'
         run: |
           python scripts/generate_report.py
 
