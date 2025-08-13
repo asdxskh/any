@@ -1,7 +1,10 @@
-continent,year,temp_anomaly_c,co2_ppm
-Europe,2020,0.8,410.0
-Europe,2021,0.9,412.0
-North America,2020,1.0,410.0
-North America,2021,1.1,412.0
-Oceania,2020,0.7,410.0
-Oceania,2021,0.8,412.0
+continent,year,co2
+Africa,2000,1.0
+Africa,2001,1.0
+Africa,2002,1.0
+Asia,2000,1.1
+Asia,2001,1.1
+Asia,2002,1.1
+Europe,2000,1.2
+Europe,2001,1.2
+Europe,2002,1.2
