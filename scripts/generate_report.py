@@ -58,6 +58,7 @@ def load_synthetic():
 def try_load_real():
     co2_url = "https://gml.noaa.gov/webdata/ccgg/trends/co2/co2_mm_mlo.csv"
     temp_url = "https://data.giss.nasa.gov/gistemp/tabledata_v4/GLB.Ts+dSST.csv"
+    local_csv = os.path.join(DATA_DIR, "climate_dataset_real.csv")
     try:
         co2_resp = requests.get(co2_url, timeout=10)
         co2_resp.raise_for_status()
@@ -76,14 +77,22 @@ def try_load_real():
         temp_df = pd.read_csv(io.StringIO(temp_resp.text), skiprows=1)
         temp_df = temp_df[["Year", "J-D"]]
         temp_df = temp_df.rename(columns={"Year": "year", "J-D": "temp_anomaly_c"})
-        temp_df["temp_anomaly_c"] = pd.to_numeric(temp_df["temp_anomaly_c"], errors="coerce") / 100.0
+        temp_df["temp_anomaly_c"] = pd.to_numeric(
+            temp_df["temp_anomaly_c"], errors="coerce"
+        ) / 100.0
         temp_df = temp_df.dropna(subset=["temp_anomaly_c"])
 
         merged = pd.merge(co2_annual, temp_df, on="year", how="inner")
         merged["year"] = merged["year"].astype(int)
+        merged.to_csv(local_csv, index=False)
         return merged
     except Exception as exc:
         print(f"Ошибка при загрузке реальных данных: {exc}")
+        if os.path.exists(local_csv):
+            try:
+                return pd.read_csv(local_csv)
+            except Exception:
+                pass
         return None
 
 
@@ -240,12 +249,11 @@ def analyze_and_report(df: pd.DataFrame, report_path: str):
     # Regional analysis
     region_fig_paths: list[str] = []
     heatmap_path = None
-    region_text = ""
     region_year_df, country_df = load_regional_dataset()
     if region_year_df is not None:
         fig_dir = os.path.join(REPORTS_DIR, "fig_regions")
         os.makedirs(fig_dir, exist_ok=True)
-        summaries = []
+        summary_rows: list[dict] = []
         for region in sorted(region_year_df["Region"].unique()):
             sub = region_year_df[region_year_df["Region"] == region]
             x = sub["year"].values
@@ -255,9 +263,13 @@ def analyze_and_report(df: pd.DataFrame, report_path: str):
             t_fit = np.polyval(t_coef, x0)
             c_fit = np.polyval(c_coef, x0)
             corr_reg = np.corrcoef(sub["co2_ppm"], sub["temp_anomaly_c"])[0, 1]
-            summaries.append(
-                f"- {region}: тренд температуры {t_coef[0]:.3f} °C/год, "
-                f"тренд CO₂ {c_coef[0]:.2f} ppm/год, корреляция {corr_reg:.3f}"
+            summary_rows.append(
+                {
+                    "Регион": region,
+                    "Тренд температуры (°C/год)": t_coef[0],
+                    "Тренд CO₂ (ppm/год)": c_coef[0],
+                    "Корреляция": corr_reg,
+                }
             )
 
             fig_t = plt.figure()
@@ -284,11 +296,27 @@ def analyze_and_report(df: pd.DataFrame, report_path: str):
             plt.close(fig_c)
             region_fig_paths.append(path_c)
 
-        region_text = "\n".join(summaries)
+        summary_df = pd.DataFrame(summary_rows)
+        fig_table, ax_table = plt.subplots(figsize=(8.27, 11.69))
+        ax_table.axis("off")
+        table = ax_table.table(
+            cellText=np.round(summary_df.values, 3),
+            colLabels=summary_df.columns,
+            loc="center",
+        )
+        table.auto_set_font_size(False)
+        table.set_fontsize(10)
+        table.scale(1, 1.5)
+        ax_table.set_title("Региональные изменения климата", pad=20)
+        table_path = os.path.join(fig_dir, "regions_table.png")
+        fig_table.savefig(table_path, bbox_inches="tight")
+        plt.close(fig_table)
+        region_fig_paths.insert(0, table_path)
 
         if gpd is not None and country_df is not None:
             trends = []
-            for country, grp in country_df.groupby("Country"):
+            recent = country_df[country_df["Year"] >= country_df["Year"].max() - 49]
+            for country, grp in recent.groupby("Country"):
                 if grp["Year"].nunique() < 2:
                     continue
                 x = grp["Year"].values
@@ -306,7 +334,7 @@ def analyze_and_report(df: pd.DataFrame, report_path: str):
                 legend=True,
                 missing_kwds={"color": "lightgrey"},
             )
-            ax.set_title("Скорость роста температуры (°C/год)")
+            ax.set_title("Скорость роста температуры за 50 лет (°C/год)")
             ax.axis("off")
             heatmap_path = os.path.join(REPORTS_DIR, "world_temp_trend.png")
             fig_map.savefig(heatmap_path, bbox_inches="tight")
@@ -343,12 +371,6 @@ def analyze_and_report(df: pd.DataFrame, report_path: str):
             plt.close(fig)
 
         if region_fig_paths:
-            section = plt.figure(figsize=(8.27, 11.69))
-            plt.axis("off")
-            header = "Региональные изменения климата\n\n" + region_text
-            plt.text(0.05, 0.95, header, va="top", wrap=True)
-            pdf.savefig(section)
-            plt.close(section)
             for p in region_fig_paths:
                 img = plt.imread(p)
                 fig = plt.figure()
