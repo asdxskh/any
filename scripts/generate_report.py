@@ -22,6 +22,8 @@ import pandas as pd
 from matplotlib import pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from datetime import datetime
+import io
+import requests
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 REPORTS_DIR = os.path.join(os.path.dirname(__file__), "..", "reports")
@@ -39,9 +41,35 @@ def load_synthetic():
     return df
 
 def try_load_real():
-    # Placeholder: implement actual download/parsing if needed.
-    # For now, just return None to fall back to synthetic.
-    return None
+    co2_url = "https://gml.noaa.gov/webdata/ccgg/trends/co2/co2_mm_mlo.csv"
+    temp_url = "https://data.giss.nasa.gov/gistemp/tabledata_v4/GLB.Ts+dSST.csv"
+    try:
+        co2_resp = requests.get(co2_url, timeout=10)
+        co2_resp.raise_for_status()
+        co2_df = pd.read_csv(
+            io.StringIO(co2_resp.text),
+            comment="#",
+            header=None,
+            names=["year", "month", "decimal", "average", "interpolated", "trend", "days"],
+        )
+        co2_df = co2_df[co2_df["average"] > 0]
+        co2_annual = co2_df.groupby("year")["average"].mean().reset_index()
+        co2_annual = co2_annual.rename(columns={"average": "co2_ppm"})
+
+        temp_resp = requests.get(temp_url, timeout=10)
+        temp_resp.raise_for_status()
+        temp_df = pd.read_csv(io.StringIO(temp_resp.text), skiprows=1)
+        temp_df = temp_df[["Year", "J-D"]]
+        temp_df = temp_df.rename(columns={"Year": "year", "J-D": "temp_anomaly_c"})
+        temp_df["temp_anomaly_c"] = pd.to_numeric(temp_df["temp_anomaly_c"], errors="coerce") / 100.0
+        temp_df = temp_df.dropna(subset=["temp_anomaly_c"])
+
+        merged = pd.merge(co2_annual, temp_df, on="year", how="inner")
+        merged["year"] = merged["year"].astype(int)
+        return merged
+    except Exception as exc:
+        print(f"Error loading real data: {exc}")
+        return None
 
 def analyze_and_report(df: pd.DataFrame, report_path: str):
     x_year = df["year"].values
