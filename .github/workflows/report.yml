@@ -34,7 +34,7 @@ jobs:
         run: |
           python scripts/generate_report.py
 
-       - name: Commit report (force add)
+      - name: Commit report (force add)
         shell: bash
         run: |
           set -eo pipefail
