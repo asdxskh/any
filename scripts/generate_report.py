@@ -70,7 +70,7 @@ def try_load_real():
         merged["year"] = merged["year"].astype(int)
         return merged
     except Exception as exc:
-        print(f"Error loading real data: {exc}")
+        print(f"Ошибка при загрузке реальных данных: {exc}")
         return None
 
 def analyze_and_report(df: pd.DataFrame, report_path: str):
@@ -94,11 +94,16 @@ def analyze_and_report(df: pd.DataFrame, report_path: str):
 
     # Figure 1
     fig1 = plt.figure()
-    plt.plot(df["year"], df["co2_ppm"], label="CO2 (ppm)")
-    plt.plot(df["year"], co2_fit, linestyle="--", label=f"Linear trend ({co2_coef[0]:.2f} ppm/yr)")
-    plt.title("Atmospheric CO2 over time")
-    plt.xlabel("Year")
-    plt.ylabel("CO2 (ppm)")
+    plt.plot(df["year"], df["co2_ppm"], label="CO₂ (ppm)")
+    plt.plot(
+        df["year"],
+        co2_fit,
+        linestyle="--",
+        label=f"Линейный тренд ({co2_coef[0]:.2f} ppm/год)",
+    )
+    plt.title("Динамика концентрации CO₂")
+    plt.xlabel("Год")
+    plt.ylabel("CO₂ (ppm)")
     plt.legend()
     fig1_path = os.path.join(REPORTS_DIR, "fig_co2.png")
     fig1.savefig(fig1_path, bbox_inches="tight")
@@ -106,11 +111,16 @@ def analyze_and_report(df: pd.DataFrame, report_path: str):
 
     # Figure 2
     fig2 = plt.figure()
-    plt.plot(df["year"], df["temp_anomaly_c"], label="Temperature anomaly (°C)")
-    plt.plot(df["year"], temp_fit, linestyle="--", label=f"Linear trend ({temp_coef[0]:.3f} °C/yr)")
-    plt.title("Global temperature anomaly over time")
-    plt.xlabel("Year")
-    plt.ylabel("Temperature anomaly (°C)")
+    plt.plot(df["year"], df["temp_anomaly_c"], label="Аномалия температуры (°C)")
+    plt.plot(
+        df["year"],
+        temp_fit,
+        linestyle="--",
+        label=f"Линейный тренд ({temp_coef[0]:.3f} °C/год)",
+    )
+    plt.title("Аномалия глобальной температуры")
+    plt.xlabel("Год")
+    plt.ylabel("Аномалия температуры (°C)")
     plt.legend()
     fig2_path = os.path.join(REPORTS_DIR, "fig_temp.png")
     fig2.savefig(fig2_path, bbox_inches="tight")
@@ -118,11 +128,16 @@ def analyze_and_report(df: pd.DataFrame, report_path: str):
 
     # Figure 3
     fig3 = plt.figure()
-    plt.scatter(df["co2_ppm"], df["temp_anomaly_c"], label="Data points")
-    plt.plot(df["co2_ppm"], temp_on_co2_fit, linestyle="--", label=f"Fit (slope {coefs_temp_on_co2[0]:.3f} °C/ppm)")
-    plt.title("Temperature anomaly vs CO2")
-    plt.xlabel("CO2 (ppm)")
-    plt.ylabel("Temperature anomaly (°C)")
+    plt.scatter(df["co2_ppm"], df["temp_anomaly_c"], label="Наблюдения")
+    plt.plot(
+        df["co2_ppm"],
+        temp_on_co2_fit,
+        linestyle="--",
+        label=f"Аппроксимация (наклон {coefs_temp_on_co2[0]:.3f} °C/ppm)",
+    )
+    plt.title("Аномалия температуры в зависимости от CO₂")
+    plt.xlabel("CO₂ (ppm)")
+    plt.ylabel("Аномалия температуры (°C)")
     plt.legend()
     fig3_path = os.path.join(REPORTS_DIR, "fig_temp_vs_co2.png")
     fig3.savefig(fig3_path, bbox_inches="tight")
@@ -134,17 +149,17 @@ def analyze_and_report(df: pd.DataFrame, report_path: str):
         plt.axis("off")
         now = datetime.now().strftime("%Y-%m-%d %H:%M")
         summary_text = (
-            "Climate Research Report\n\n"
-            f"Generated: {now}\n\n"
-            "Dataset:\n"
-            f"- Years: {int(df['year'].min())}–{int(df['year'].max())}\n"
-            "- Variables: Atmospheric CO2 (ppm), Global temperature anomaly (°C)\n\n"
-            "Key Results:\n"
-            f"- Linear trend CO2: {co2_coef[0]:.2f} ppm/yr\n"
-            f"- Linear trend temperature: {temp_coef[0]:.3f} °C/yr\n"
-            f"- Pearson correlation (CO2 vs Temp): {corr:.3f}\n\n"
-            "Notes:\n"
-            "- Data source: synthetic by default; set USE_REAL_DATA=1 to attempt real data.\n"
+            "Отчёт по климатическому исследованию\n\n"
+            f"Сгенерирован: {now}\n\n"
+            "Датасет:\n"
+            f"- Годы: {int(df['year'].min())}–{int(df['year'].max())}\n"
+            "- Переменные: концентрация CO₂ (ppm), глобальная аномалия температуры (°C)\n\n"
+            "Ключевые результаты:\n"
+            f"- Линейный тренд CO₂: {co2_coef[0]:.2f} ppm/год\n"
+            f"- Линейный тренд температуры: {temp_coef[0]:.3f} °C/год\n"
+            f"- Коэффициент корреляции (CO₂ vs Температура): {corr:.3f}\n\n"
+            "Примечания:\n"
+            "- Источник данных: по умолчанию синтетические; установите USE_REAL_DATA=1 для попытки загрузки реальных данных.\n"
         )
         plt.text(0.05, 0.95, summary_text, va="top", wrap=True)
         pdf.savefig(fig_cover)
@@ -163,13 +178,13 @@ def main():
     if use_real:
         df = try_load_real()
         if df is None:
-            print("Real data unavailable; falling back to synthetic.")
+            print("Реальные данные недоступны; используем синтетические.")
             df = load_synthetic()
     else:
         df = load_synthetic()
     report_path = os.path.join(REPORTS_DIR, "research_report.pdf")
     analyze_and_report(df, report_path)
-    print(f"Done. Report -> {report_path}")
+    print(f"Готово. Отчёт -> {report_path}")
 
 if __name__ == "__main__":
     main()
