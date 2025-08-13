@@ -1,8 +1,23 @@
 
 # Climate Research Demo (CO₂ vs Global Temperature)
 
-Этот репозиторий демонстрирует научный пайплайн:
-данные → анализ → графики → PDF-отчёт → автоматическое обновление по расписанию.
+Репозиторий еженедельно обновляет CSV с глобальными и континентальными климатическими данными
+(концентрация CO₂ и температурные аномалии). Проект демонстрирует научный
+пайплайн: данные → анализ → графики → PDF‑отчёт → автоматическое обновление по
+расписанию.
+
+## Формат данных
+CSV находятся в папке `data/`:
+
+- `climate_dataset.csv` — глобальные годовые значения:
+  - `year` — год;
+  - `co2_ppm` — средняя концентрация CO₂;
+  - `temp_anomaly_c` — глобальная температурная аномалия (°C).
+- `climate_by_region.csv` — средние по континентам:
+  - `Region` — название региона;
+  - `year` — год;
+  - `co2_ppm` — концентрация CO₂;
+  - `temp_anomaly_c` — температурная аномалия (°C).
 
 ## Структура
 ```
@@ -13,17 +28,12 @@ scripts/             # Скрипты анализа
 requirements.txt     # Зависимости
 README.md            # Это описание
 ```
-## Быстрый старт (локально)
-1. Установите Python 3.10+
-2. Установите зависимости:
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. Сгенерируйте отчёт:
-   ```bash
-   python scripts/generate_report.py
-   ```
-   Результат: `reports/research_report.pdf`
+## Как запустить локально
+```bash
+pip install -r requirements.txt
+python scripts/generate_report.py
+```
+CSV появятся в `data/`, отчёт — в `reports/research_report.pdf`.
 
 ### Опционально: реальные данные
 Скрипт умеет загружать реальные глобальные данные из NOAA (CO₂) и NASA GISTEMP,
@@ -37,8 +47,9 @@ USE_REAL_DATA=1 python scripts/generate_report.py
 графиками и тепловой картой мира.
 
 ## Автоотчёт (GitHub Actions)
-Файл `.github/workflows/report.yml` запускает генерацию по расписанию.
-Он:
+Файл `.github/workflows/report.yml` еженедельно обновляет CSV и отчёт.
+Для ручного запуска на GitHub откройте вкладку **Actions** → **Run workflow**.
+Workflow:
 - устанавливает Python и зависимости,
 - запускает `scripts/generate_report.py`,
 - коммитит новые артефакты в репозиторий.
