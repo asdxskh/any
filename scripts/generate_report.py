@@ -54,6 +54,22 @@ STATIC_COUNTRY_CONTINENT = {
 }
 
 
+def to_num(s: pd.Series) -> pd.Series:
+    """Convert a Series to numeric dtype, coercing errors to NaN."""
+    return pd.to_numeric(s, errors="coerce")
+
+
+def clean_year(s: pd.Series) -> pd.Series:
+    """Return year values as pandas ``Int64`` nullable integers."""
+    return to_num(s).astype("Int64")
+
+
+def ensure_year_int(df: pd.DataFrame, column: str = "year") -> pd.DataFrame:
+    """Ensure the year column on ``df`` is ``Int64``."""
+    df[column] = clean_year(df[column])
+    return df
+
+
 def safe_download(url: str, cache_path: str) -> Optional[str]:
     """Download text from URL with fallback to local cache."""
     try:
@@ -81,13 +97,15 @@ def get_co2_noaa() -> Optional[pd.DataFrame]:
         header=None,
         names=["year", "month", "decimal", "average", "interpolated", "trend", "days"],
     )
-    df["average"] = pd.to_numeric(df["average"], errors="coerce")
+    df["average"] = to_num(df["average"]).astype(float)
+    df = ensure_year_int(df)
     df = df[df["average"] > 0]
     co2_year = (
-        df.groupby("year", as_index=False)["average"].mean().rename(
-            columns={"average": "co2_ppm"}
-        )
+        df.groupby("year", as_index=False)
+        .mean(numeric_only=True)[["year", "average"]]
+        .rename(columns={"average": "co2_ppm"})
     )
+    co2_year = ensure_year_int(co2_year)
     return co2_year
 
 
@@ -101,8 +119,8 @@ def get_berkeley_country() -> Optional[pd.DataFrame]:
     df = df[["Country", "Year", "Anomaly"]].rename(
         columns={"Country": "country", "Year": "year", "Anomaly": "temp_anomaly_c"}
     )
-    df["temp_anomaly_c"] = pd.to_numeric(df["temp_anomaly_c"], errors="coerce")
-    df["year"] = pd.to_numeric(df["year"], errors="coerce")
+    df["temp_anomaly_c"] = to_num(df["temp_anomaly_c"]).astype(float)
+    df = ensure_year_int(df)
     return df.dropna()
 
 
@@ -147,14 +165,18 @@ def main() -> None:
     temp_df["continent"] = temp_df["country"].apply(country_to_continent)
     temp_df = temp_df.dropna(subset=["continent"])
 
-    temp_global = temp_df.groupby("year", as_index=False)["temp_anomaly_c"].mean()
-    temp_cont = temp_df.groupby(["continent", "year"], as_index=False)["temp_anomaly_c"].mean()
+    temp_global = temp_df.groupby("year", as_index=False).mean(numeric_only=True)
+    temp_cont = temp_df.groupby(["continent", "year"], as_index=False).mean(numeric_only=True)
+
+    temp_global = ensure_year_int(temp_global)
+    temp_cont = ensure_year_int(temp_cont)
+    co2_year = ensure_year_int(co2_year)
 
     global_df = temp_global.merge(co2_year, on="year", how="inner").sort_values("year")
     continent_df = temp_cont.merge(co2_year, on="year", how="left").dropna(subset=["co2_ppm"])
 
-    global_df["year"] = global_df["year"].astype(int)
-    continent_df["year"] = continent_df["year"].astype(int)
+    global_df = ensure_year_int(global_df)
+    continent_df = ensure_year_int(continent_df)
 
     global_df = global_df.round(3)
     continent_df = continent_df.round(3)
