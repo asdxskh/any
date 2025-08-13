@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import io
 import os
+from functools import lru_cache
 from typing import Optional
 
 import pandas as pd
@@ -115,6 +116,7 @@ def synthetic_country_df() -> pd.DataFrame:
     )
 
 
+@lru_cache(maxsize=None)
 def country_to_continent(name: str) -> Optional[str]:
     if country_alpha2_to_continent_code and country_name_to_country_alpha2:
         try:
