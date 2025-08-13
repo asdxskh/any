@@ -94,6 +94,7 @@ REGION_NAMES = {
     "NA": "Северная Америка",
     "SA": "Южная Америка",
     "OC": "Океания",
+    "AN": "Арктика",
 }
 
 
@@ -109,22 +110,62 @@ def _country_to_region(name: str) -> str:
         return "Прочие"
 
 
-def load_regional_dataset() -> pd.DataFrame | None:
-    """Load Berkeley Earth country anomalies and add region column."""
+def load_regional_dataset() -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
+    """Load or build dataset by region and by country.
+
+    Returns
+    -------
+    (region_df, country_df)
+        region_df contains columns [Region, year, temp_anomaly_c, co2_ppm]
+        country_df contains raw Berkeley Earth country anomalies
+    """
+    region_csv = os.path.join(DATA_DIR, "climate_by_region.csv")
+    country_csv = os.path.join(DATA_DIR, "climate_by_country.csv")
+    if os.path.exists(region_csv):
+        region_df = pd.read_csv(region_csv)
+        country_df = pd.read_csv(country_csv) if os.path.exists(country_csv) else None
+        return region_df, country_df
+
     url = "https://berkeleyearth.lbl.gov/auto/Global/Complete_TAVG_complete.txt"
+    co2_url = "https://gml.noaa.gov/webdata/ccgg/trends/co2/co2_mm_mlo.csv"
     try:
         resp = requests.get(url, timeout=10)
         resp.raise_for_status()
-        df = pd.read_csv(io.StringIO(resp.text), comment="#")
-        # Expect columns: Country, Year, Anomaly (°C)
-        df = df[["Country", "Year", "Anomaly"]]
-        df["Region"] = df["Country"].apply(_country_to_region)
-        csv_path = os.path.join(DATA_DIR, "climate_by_region.csv")
-        df.to_csv(csv_path, index=False)
-        return df
+        country_df = pd.read_csv(io.StringIO(resp.text), comment="#")
+        country_df = country_df[["Country", "Year", "Anomaly"]]
+        country_df["Region"] = country_df["Country"].apply(_country_to_region)
+
+        co2_resp = requests.get(co2_url, timeout=10)
+        co2_resp.raise_for_status()
+        co2_df = pd.read_csv(
+            io.StringIO(co2_resp.text),
+            comment="#",
+            header=None,
+            names=["year", "month", "decimal", "average", "interpolated", "trend", "days"],
+        )
+        co2_df = co2_df[co2_df["average"] > 0]
+        co2_annual = co2_df.groupby("year")["average"].mean().reset_index()
+        co2_annual = co2_annual.rename(columns={"average": "co2_ppm", "year": "Year"})
+
+        merged = country_df.merge(co2_annual, on="Year", how="left")
+        region_df = (
+            merged.groupby(["Region", "Year"])
+            .agg({"Anomaly": "mean", "co2_ppm": "mean"})
+            .reset_index()
+        )
+        region_df = region_df.rename(
+            columns={"Year": "year", "Anomaly": "temp_anomaly_c"}
+        )
+        region_df.to_csv(region_csv, index=False)
+        country_df.to_csv(country_csv, index=False)
+        return region_df, country_df
     except Exception as exc:  # pragma: no cover - network issues
         print(f"Не удалось загрузить региональные данные: {exc}")
-        return None
+        if os.path.exists(region_csv):
+            region_df = pd.read_csv(region_csv)
+            country_df = pd.read_csv(country_csv) if os.path.exists(country_csv) else None
+            return region_df, country_df
+        return None, None
 
 def analyze_and_report(df: pd.DataFrame, report_path: str):
     x_year = df["year"].values
@@ -197,43 +238,77 @@ def analyze_and_report(df: pd.DataFrame, report_path: str):
     plt.close(fig3)
 
     # Regional analysis
-    region_fig_path = None
+    region_fig_paths: list[str] = []
     heatmap_path = None
-    region_country_df = load_regional_dataset()
-    if region_country_df is not None:
-        region_year_df = (
-            region_country_df.groupby(["Region", "Year"])["Anomaly"].mean().reset_index()
-        )
+    region_text = ""
+    region_year_df, country_df = load_regional_dataset()
+    if region_year_df is not None:
+        fig_dir = os.path.join(REPORTS_DIR, "fig_regions")
+        os.makedirs(fig_dir, exist_ok=True)
+        summaries = []
+        for region in sorted(region_year_df["Region"].unique()):
+            sub = region_year_df[region_year_df["Region"] == region]
+            x = sub["year"].values
+            x0 = x - x.min()
+            t_coef = np.polyfit(x0, sub["temp_anomaly_c"].values, 1)
+            c_coef = np.polyfit(x0, sub["co2_ppm"].values, 1)
+            t_fit = np.polyval(t_coef, x0)
+            c_fit = np.polyval(c_coef, x0)
+            corr_reg = np.corrcoef(sub["co2_ppm"], sub["temp_anomaly_c"])[0, 1]
+            summaries.append(
+                f"- {region}: тренд температуры {t_coef[0]:.3f} °C/год, "
+                f"тренд CO₂ {c_coef[0]:.2f} ppm/год, корреляция {corr_reg:.3f}"
+            )
 
-        fig_reg = plt.figure()
-        for reg in [REGION_NAMES[code] for code in ["EU", "AS", "AF", "NA", "SA", "OC"]]:
-            sub = region_year_df[region_year_df["Region"] == reg]
-            if not sub.empty:
-                plt.plot(sub["Year"], sub["Anomaly"], label=reg)
-        plt.title("Аномалии температуры по регионам")
-        plt.xlabel("Год")
-        plt.ylabel("Аномалия (°C)")
-        plt.legend()
-        region_fig_path = os.path.join(REPORTS_DIR, "fig_region_trends.png")
-        fig_reg.savefig(region_fig_path, bbox_inches="tight")
-        plt.close(fig_reg)
+            fig_t = plt.figure()
+            plt.plot(sub["year"], sub["temp_anomaly_c"], label="Температура")
+            plt.plot(sub["year"], t_fit, linestyle="--", label=f"Тренд ({t_coef[0]:.3f})")
+            plt.title(f"Аномалия температуры — {region}")
+            plt.xlabel("Год")
+            plt.ylabel("Аномалия (°C)")
+            plt.legend()
+            path_t = os.path.join(fig_dir, f"{region}_temp.png")
+            fig_t.savefig(path_t, bbox_inches="tight")
+            plt.close(fig_t)
+            region_fig_paths.append(path_t)
 
-        if gpd is not None:
-            latest_year = int(region_country_df["Year"].max())
-            latest_df = region_country_df[region_country_df["Year"] == latest_year]
+            fig_c = plt.figure()
+            plt.plot(sub["year"], sub["co2_ppm"], label="CO₂")
+            plt.plot(sub["year"], c_fit, linestyle="--", label=f"Тренд ({c_coef[0]:.2f})")
+            plt.title(f"CO₂ — {region}")
+            plt.xlabel("Год")
+            plt.ylabel("CO₂ (ppm)")
+            plt.legend()
+            path_c = os.path.join(fig_dir, f"{region}_co2.png")
+            fig_c.savefig(path_c, bbox_inches="tight")
+            plt.close(fig_c)
+            region_fig_paths.append(path_c)
+
+        region_text = "\n".join(summaries)
+
+        if gpd is not None and country_df is not None:
+            trends = []
+            for country, grp in country_df.groupby("Country"):
+                if grp["Year"].nunique() < 2:
+                    continue
+                x = grp["Year"].values
+                x0 = x - x.min()
+                coef = np.polyfit(x0, grp["Anomaly"].values, 1)
+                trends.append({"Country": country, "trend": coef[0]})
+            trends_df = pd.DataFrame(trends)
             world = gpd.read_file(gpd.datasets.get_path("naturalearth_lowres"))
-            world = world.merge(latest_df, left_on="name", right_on="Country", how="left")
+            world = world.merge(trends_df, left_on="name", right_on="Country", how="left")
             fig_map, ax = plt.subplots(1, 1, figsize=(10, 5))
             world.plot(
-                column="Anomaly",
+                column="trend",
                 ax=ax,
                 cmap="coolwarm",
                 legend=True,
                 missing_kwds={"color": "lightgrey"},
             )
-            ax.set_title(f"Аномалия температуры по странам, {latest_year}")
+            ax.set_title("Скорость роста температуры (°C/год)")
             ax.axis("off")
-            heatmap_path = os.path.join(REPORTS_DIR, "fig_region_heatmap.png")
+            heatmap_path = os.path.join(REPORTS_DIR, "world_temp_trend.png")
             fig_map.savefig(heatmap_path, bbox_inches="tight")
             plt.close(fig_map)
 
@@ -267,14 +342,22 @@ def analyze_and_report(df: pd.DataFrame, report_path: str):
             pdf.savefig(fig)
             plt.close(fig)
 
-        if region_fig_path and heatmap_path:
+        if region_fig_paths:
             section = plt.figure(figsize=(8.27, 11.69))
             plt.axis("off")
-            plt.text(0.05, 0.95, "Региональные изменения климата", va="top", wrap=True)
+            header = "Региональные изменения климата\n\n" + region_text
+            plt.text(0.05, 0.95, header, va="top", wrap=True)
             pdf.savefig(section)
             plt.close(section)
-            for p in [region_fig_path, heatmap_path]:
+            for p in region_fig_paths:
                 img = plt.imread(p)
+                fig = plt.figure()
+                plt.imshow(img)
+                plt.axis("off")
+                pdf.savefig(fig)
+                plt.close(fig)
+            if heatmap_path:
+                img = plt.imread(heatmap_path)
                 fig = plt.figure()
                 plt.imshow(img)
                 plt.axis("off")
