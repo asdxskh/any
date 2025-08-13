@@ -19,6 +19,8 @@ Note: URLs/APIs may change. Adjust fetch functions accordingly.
 import os
 import numpy as np
 import pandas as pd
+import matplotlib
+matplotlib.use("Agg")
 from matplotlib import pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from datetime import datetime
