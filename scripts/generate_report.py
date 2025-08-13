@@ -59,14 +59,16 @@ def to_num(s: pd.Series) -> pd.Series:
     return pd.to_numeric(s, errors="coerce")
 
 
-def clean_year(s: pd.Series) -> pd.Series:
-    """Return year values as pandas ``Int64`` nullable integers."""
-    return to_num(s).astype("Int64")
-
-
 def ensure_year_int(df: pd.DataFrame, column: str = "year") -> pd.DataFrame:
-    """Ensure the year column on ``df`` is ``Int64``."""
-    df[column] = clean_year(df[column])
+    """Ensure the year column on ``df`` contains integers.
+
+    The column is coerced to numeric, rows with invalid years are dropped,
+    and the result is cast to ``int``.
+    """
+
+    df[column] = pd.to_numeric(df[column], errors="coerce")
+    df = df.dropna(subset=[column])
+    df[column] = df[column].astype(int)
     return df
 
 
@@ -181,31 +183,47 @@ def main() -> None:
     global_df = global_df.round(3)
     continent_df = continent_df.round(3)
 
-    latest_year = int(global_df["year"].max())
-    latest_co2 = float(global_df.loc[global_df["year"] == latest_year, "co2_ppm"].iloc[0])
-    latest_temp = float(
-        global_df.loc[global_df["year"] == latest_year, "temp_anomaly_c"].iloc[0]
-    )
-    snapshot_rows = [
-        {"metric": "co2_ppm", "scope": "global", "value": latest_co2, "year": latest_year},
-        {
-            "metric": "temp_anomaly_c",
-            "scope": "global",
-            "value": latest_temp,
-            "year": latest_year,
-        },
-    ]
+    if not global_df.empty:
+        latest_year = int(global_df["year"].max())
+    elif not co2_year.empty:
+        latest_year = int(co2_year["year"].max())
+    else:
+        latest_year = 2000
+
+    snapshot_rows = []
+
+    latest_co2_series = global_df.loc[global_df["year"] == latest_year, "co2_ppm"]
+    if not latest_co2_series.empty:
+        latest_co2 = float(latest_co2_series.tail(1).values[0])
+        snapshot_rows.append(
+            {"metric": "co2_ppm", "scope": "global", "value": latest_co2, "year": latest_year}
+        )
+
+    latest_temp_series = global_df.loc[global_df["year"] == latest_year, "temp_anomaly_c"]
+    if not latest_temp_series.empty:
+        latest_temp = float(latest_temp_series.tail(1).values[0])
+        snapshot_rows.append(
+            {
+                "metric": "temp_anomaly_c",
+                "scope": "global",
+                "value": latest_temp,
+                "year": latest_year,
+            }
+        )
+
     for cont in sorted(continent_df["continent"].unique()):
         sub = continent_df[(continent_df["continent"] == cont) & (continent_df["year"] == latest_year)]
         if not sub.empty:
-            snapshot_rows.append(
-                {
-                    "metric": "temp_anomaly_c",
-                    "scope": cont,
-                    "value": float(sub["temp_anomaly_c"].iloc[0]),
-                    "year": latest_year,
-                }
-            )
+            temp_series = sub["temp_anomaly_c"].dropna()
+            if not temp_series.empty:
+                snapshot_rows.append(
+                    {
+                        "metric": "temp_anomaly_c",
+                        "scope": cont,
+                        "value": float(temp_series.tail(1).values[0]),
+                        "year": latest_year,
+                    }
+                )
 
     snapshot_df = pd.DataFrame(snapshot_rows).round(3)
 
