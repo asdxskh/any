@@ -1,7 +1,3 @@
-
-geopandas
-matplotlib
-numpy
 pandas
-pycountry-convert
 requests
+pycountry-convert
