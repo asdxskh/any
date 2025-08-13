@@ -54,6 +54,17 @@ def main() -> None:
 
     latest_year = int(continent_ts["year"].max())
     latest_snapshot = continent_ts[continent_ts["year"] == latest_year]
+
+    # include a global aggregate row so downstream consumers can easily access
+    # worldwide values without recomputing them.  This mirrors the structure of
+    # the historical time series CSVs, which also contain global totals.
+    global_value = float(
+        global_ts.loc[global_ts["year"] == latest_year, "co2"].sum()
+    )
+    global_row = pd.DataFrame(
+        [{"continent": "Global", "year": latest_year, "co2": global_value}]
+    )
+    latest_snapshot = pd.concat([latest_snapshot, global_row], ignore_index=True)
     latest_snapshot.to_csv(LATEST_SNAPSHOT, index=False)
 
 
