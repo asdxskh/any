@@ -26,6 +26,19 @@ from matplotlib.backends.backend_pdf import PdfPages
 from datetime import datetime
 import io
 import requests
+try:  # Optional dependencies
+    import geopandas as gpd
+except Exception:  # pragma: no cover - optional
+    gpd = None
+
+try:
+    from pycountry_convert import (
+        country_alpha2_to_continent_code,
+        country_name_to_country_alpha2,
+    )
+except Exception:  # pragma: no cover - optional
+    country_alpha2_to_continent_code = None
+    country_name_to_country_alpha2 = None
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 REPORTS_DIR = os.path.join(os.path.dirname(__file__), "..", "reports")
@@ -71,6 +84,46 @@ def try_load_real():
         return merged
     except Exception as exc:
         print(f"Ошибка при загрузке реальных данных: {exc}")
+        return None
+
+
+REGION_NAMES = {
+    "EU": "Европа",
+    "AS": "Азия",
+    "AF": "Африка",
+    "NA": "Северная Америка",
+    "SA": "Южная Америка",
+    "OC": "Океания",
+}
+
+
+def _country_to_region(name: str) -> str:
+    """Map English country name to Russian region name."""
+    if not country_name_to_country_alpha2 or not country_alpha2_to_continent_code:
+        return "Прочие"
+    try:
+        alpha2 = country_name_to_country_alpha2(name)
+        cont_code = country_alpha2_to_continent_code(alpha2)
+        return REGION_NAMES.get(cont_code, "Прочие")
+    except Exception:
+        return "Прочие"
+
+
+def load_regional_dataset() -> pd.DataFrame | None:
+    """Load Berkeley Earth country anomalies and add region column."""
+    url = "https://berkeleyearth.lbl.gov/auto/Global/Complete_TAVG_complete.txt"
+    try:
+        resp = requests.get(url, timeout=10)
+        resp.raise_for_status()
+        df = pd.read_csv(io.StringIO(resp.text), comment="#")
+        # Expect columns: Country, Year, Anomaly (°C)
+        df = df[["Country", "Year", "Anomaly"]]
+        df["Region"] = df["Country"].apply(_country_to_region)
+        csv_path = os.path.join(DATA_DIR, "climate_by_region.csv")
+        df.to_csv(csv_path, index=False)
+        return df
+    except Exception as exc:  # pragma: no cover - network issues
+        print(f"Не удалось загрузить региональные данные: {exc}")
         return None
 
 def analyze_and_report(df: pd.DataFrame, report_path: str):
@@ -143,6 +196,47 @@ def analyze_and_report(df: pd.DataFrame, report_path: str):
     fig3.savefig(fig3_path, bbox_inches="tight")
     plt.close(fig3)
 
+    # Regional analysis
+    region_fig_path = None
+    heatmap_path = None
+    region_country_df = load_regional_dataset()
+    if region_country_df is not None:
+        region_year_df = (
+            region_country_df.groupby(["Region", "Year"])["Anomaly"].mean().reset_index()
+        )
+
+        fig_reg = plt.figure()
+        for reg in [REGION_NAMES[code] for code in ["EU", "AS", "AF", "NA", "SA", "OC"]]:
+            sub = region_year_df[region_year_df["Region"] == reg]
+            if not sub.empty:
+                plt.plot(sub["Year"], sub["Anomaly"], label=reg)
+        plt.title("Аномалии температуры по регионам")
+        plt.xlabel("Год")
+        plt.ylabel("Аномалия (°C)")
+        plt.legend()
+        region_fig_path = os.path.join(REPORTS_DIR, "fig_region_trends.png")
+        fig_reg.savefig(region_fig_path, bbox_inches="tight")
+        plt.close(fig_reg)
+
+        if gpd is not None:
+            latest_year = int(region_country_df["Year"].max())
+            latest_df = region_country_df[region_country_df["Year"] == latest_year]
+            world = gpd.read_file(gpd.datasets.get_path("naturalearth_lowres"))
+            world = world.merge(latest_df, left_on="name", right_on="Country", how="left")
+            fig_map, ax = plt.subplots(1, 1, figsize=(10, 5))
+            world.plot(
+                column="Anomaly",
+                ax=ax,
+                cmap="coolwarm",
+                legend=True,
+                missing_kwds={"color": "lightgrey"},
+            )
+            ax.set_title(f"Аномалия температуры по странам, {latest_year}")
+            ax.axis("off")
+            heatmap_path = os.path.join(REPORTS_DIR, "fig_region_heatmap.png")
+            fig_map.savefig(heatmap_path, bbox_inches="tight")
+            plt.close(fig_map)
+
     # PDF
     with PdfPages(report_path) as pdf:
         fig_cover = plt.figure(figsize=(8.27, 11.69))
@@ -172,6 +266,20 @@ def analyze_and_report(df: pd.DataFrame, report_path: str):
             plt.axis("off")
             pdf.savefig(fig)
             plt.close(fig)
+
+        if region_fig_path and heatmap_path:
+            section = plt.figure(figsize=(8.27, 11.69))
+            plt.axis("off")
+            plt.text(0.05, 0.95, "Региональные изменения климата", va="top", wrap=True)
+            pdf.savefig(section)
+            plt.close(section)
+            for p in [region_fig_path, heatmap_path]:
+                img = plt.imread(p)
+                fig = plt.figure()
+                plt.imshow(img)
+                plt.axis("off")
+                pdf.savefig(fig)
+                plt.close(fig)
 
 def main():
     use_real = os.environ.get("USE_REAL_DATA", "0") == "1"
