@@ -1,4 +1,1 @@
-year,co2
-2000,3.3
-2001,3.3
-2002,3.3
+year,temp_anomaly_c,co2_ppm
